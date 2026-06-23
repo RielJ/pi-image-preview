@@ -228,6 +228,12 @@ export function registerImagePreviewExtension(
 				debugLog("Error during editor text scan", err);
 			});
 		}, POLL_INTERVAL_MS);
+		// Don't let the poll timer keep the Node event loop alive.
+		// In non-interactive modes (e.g. `pi --print`), the process must be
+		// able to exit once work is done — an active interval would block exit.
+		if (typeof pollTimer.unref === "function") {
+			pollTimer.unref();
+		}
 	}
 
 	function stopPolling(): void {
