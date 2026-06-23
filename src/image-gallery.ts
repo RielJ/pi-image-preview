@@ -5,7 +5,7 @@ import {
 	getImageDimensions,
 	calculateImageRows,
 	getCellDimensions,
-} from "@mariozechner/pi-tui";
+} from "@earendil-works/pi-tui";
 
 /**
  * Detect image protocol support, working around pi-tui ≥0.67.6 which
