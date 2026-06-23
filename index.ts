@@ -18,7 +18,7 @@ async function loadPiImageResizer(): Promise<ImageResizer | null> {
 	cachedResizerPromise = (async () => {
 		try {
 			const require = createRequire(import.meta.url);
-			const piEntry = require.resolve("@mariozechner/pi-coding-agent");
+			const piEntry = require.resolve("@earendil-works/pi-coding-agent");
 			const distDir = path.dirname(piEntry);
 			const moduleUrl = pathToFileURL(
 				path.join(distDir, "utils", "image-resize.js"),
