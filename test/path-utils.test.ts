@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { inferMimeType } from "./path-utils.ts";
+import { inferMimeType } from "../src/path-utils.ts";
 
 describe("image MIME inference", () => {
 	it("recognizes a PNG path as a PNG image", () => {
