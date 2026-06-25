@@ -9,7 +9,10 @@ import { debugLog } from "./debug.ts";
 
 type TrackedImage = {
 	filePath: string;
+	/** Full-resolution image attached to the submitted message. */
 	image: ImageContent;
+	/** Small PNG thumbnail used only for the inline gallery preview. */
+	previewImage?: ImageContent;
 	label: string;
 };
 
@@ -97,11 +100,14 @@ export function registerImagePreviewExtension(
 			return;
 		}
 
-		const galleryImages: GalleryImage[] = [...tracked.values()].map((t) => ({
-			data: t.image.data,
-			mimeType: t.image.mimeType,
-			label: t.label,
-		}));
+		const galleryImages: GalleryImage[] = [...tracked.values()].map((t) => {
+			const preview = t.previewImage ?? t.image;
+			return {
+				data: preview.data,
+				mimeType: preview.mimeType,
+				label: t.label,
+			};
+		});
 
 		// Dispose the previous gallery to free kitty image resources before replacement
 		if (gallery) {
@@ -184,13 +190,15 @@ export function registerImagePreviewExtension(
 			});
 			changed = true;
 
-			// Async resize in background
+			// Build the small PNG preview thumbnail in the background so a large
+			// image renders instead of overflowing kitty/tmux transmission. The
+			// full image stays in `entry.image` for the message attachment.
 			if (deps.maybeResizeImage) {
 				const entry = tracked.get(raw)!;
 				void deps.maybeResizeImage(image).then((resized) => {
 					// Guard against the entry having been removed while resize was in-flight
 					if (tracked.has(raw) && tracked.get(raw) === entry) {
-						entry.image = resized;
+						entry.previewImage = resized;
 						if (latestCtx) refreshWidget(latestCtx);
 					}
 				}).catch((err) => {
