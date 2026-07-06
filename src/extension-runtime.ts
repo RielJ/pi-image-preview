@@ -1,6 +1,7 @@
 import path from "node:path";
 import type { ImageContent, ContentBlock } from "./content.ts";
 import { ImageGallery, type GalleryImage } from "./image-gallery.ts";
+import { extractImagePaths } from "./image-paths.ts";
 import { upgradeScreenshotToolResult } from "./tool-result-upgrader.ts";
 import { debugLog } from "./debug.ts";
 
@@ -8,7 +9,10 @@ import { debugLog } from "./debug.ts";
 
 type TrackedImage = {
 	filePath: string;
+	/** Full-resolution image attached to the submitted message. */
 	image: ImageContent;
+	/** Small PNG thumbnail used only for the inline gallery preview. */
+	previewImage?: ImageContent;
 	label: string;
 };
 
@@ -68,15 +72,6 @@ type ToolResultEvent = import("./tool-result-upgrader.ts").ToolResultEventLike;
 const WIDGET_KEY = "image-preview";
 const POLL_INTERVAL_MS = 250;
 
-// Matches image file paths:
-//   - Absolute: /path/to/image.png
-//   - Home-relative: ~/screenshots/image.png
-//   - Relative: ./images/image.png, ../images/image.png
-// Supports common path characters including spaces (escaped with \),
-// parens, #, +, and other special characters.
-const IMAGE_PATH_RE =
-	/((?:~\/|\.\.?\/|\/)[^\s:*?"<>|][^\s:*?"<>|]*\.(?:png|jpe?g|gif|webp))(?=\s|$)/gi;
-
 /** Produce a label from an image path — just the filename. */
 function trimImageLabel(filePath: string): string {
 	return path.basename(filePath);
@@ -105,11 +100,14 @@ export function registerImagePreviewExtension(
 			return;
 		}
 
-		const galleryImages: GalleryImage[] = [...tracked.values()].map((t) => ({
-			data: t.image.data,
-			mimeType: t.image.mimeType,
-			label: t.label,
-		}));
+		const galleryImages: GalleryImage[] = [...tracked.values()].map((t) => {
+			const preview = t.previewImage ?? t.image;
+			return {
+				data: preview.data,
+				mimeType: preview.mimeType,
+				label: t.label,
+			};
+		});
 
 		// Dispose the previous gallery to free kitty image resources before replacement
 		if (gallery) {
@@ -165,44 +163,46 @@ export function registerImagePreviewExtension(
 			return;
 		}
 
-		// Find all image paths currently in the text
-		// Create a fresh regex each time to avoid stale lastIndex from the `g` flag
-		const imagePathRe = new RegExp(IMAGE_PATH_RE.source, IMAGE_PATH_RE.flags);
-		const matches = [...text.matchAll(imagePathRe)];
+		// Find all image paths currently in the text. Handles plain, relative,
+		// home-relative, backslash-escaped, and quoted paths (typed, pasted, or
+		// inserted by drag-and-drop). Track by the exact editor substring (`raw`)
+		// so removal and submit matching stay in sync with the visible text, but
+		// read the file and build the label from the resolved `path`.
+		const detected = extractImagePaths(text);
 		const currentPaths = new Set<string>();
 
 		let changed = false;
 
-		for (const match of matches) {
-			const rawPath = match[1];
-			if (!rawPath) continue;
-			currentPaths.add(rawPath);
+		for (const { raw, path: filePath } of detected) {
+			currentPaths.add(raw);
 
 			// Already tracked?
-			if (tracked.has(rawPath)) continue;
+			if (tracked.has(raw)) continue;
 
 			// New path — try to load it (async to avoid blocking event loop)
-			const image = await deps.readImageContentFromPathAsync(rawPath);
+			const image = await deps.readImageContentFromPathAsync(filePath);
 			if (!image) continue;
 
-			tracked.set(rawPath, {
-				filePath: rawPath,
+			tracked.set(raw, {
+				filePath,
 				image,
-				label: trimImageLabel(rawPath),
+				label: trimImageLabel(filePath),
 			});
 			changed = true;
 
-			// Async resize in background
+			// Build the small PNG preview thumbnail in the background so a large
+			// image renders instead of overflowing kitty/tmux transmission. The
+			// full image stays in `entry.image` for the message attachment.
 			if (deps.maybeResizeImage) {
-				const entry = tracked.get(rawPath)!;
+				const entry = tracked.get(raw)!;
 				void deps.maybeResizeImage(image).then((resized) => {
 					// Guard against the entry having been removed while resize was in-flight
-					if (tracked.has(rawPath) && tracked.get(rawPath) === entry) {
-						entry.image = resized;
+					if (tracked.has(raw) && tracked.get(raw) === entry) {
+						entry.previewImage = resized;
 						if (latestCtx) refreshWidget(latestCtx);
 					}
 				}).catch((err) => {
-					debugLog(`Failed to resize image ${rawPath}`, err);
+					debugLog(`Failed to resize image ${filePath}`, err);
 				});
 			}
 		}

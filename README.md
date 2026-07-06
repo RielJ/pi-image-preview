@@ -6,12 +6,13 @@ Image preview extension for [pi coding agent](https://github.com/badlogic/pi-mon
 
 ## Features
 
-- **Inline image preview** — paste an image (`Ctrl+V`) and a thumbnail renders above the editor
+- **Inline image preview** — paste (`Ctrl+V`), drag-and-drop a file, or type a path, and a thumbnail renders above the editor
+- **Drag-and-drop & spaces in paths** — recognizes backslash-escaped and single/double-quoted paths, so filenames containing spaces work
+- **Any format, any size** — thumbnails are resized and converted to PNG (the format the kitty protocol transmits), so JPEG/WebP/GIF previews render and large images don't overflow the graphics transmission
 - **Horizontal layout** — multiple images display side by side
 - **tmux support** — uses kitty's Unicode placeholder protocol (`U=1`) so images are pane-aware (no ghosting across panes)
 - **Auto-cleanup** — delete the image path from editor text and the preview disappears
 - **No editor conflicts** — works alongside vim mode and other editor extensions (does not use `setEditorComponent`)
-- **Image resizing** — leverages pi's built-in WASM image resizer for efficient thumbnails
 - **Screenshot integration** — automatically inlines images from screenshot tool results
 
 ## Install
@@ -22,11 +23,11 @@ pi install npm:pi-image-preview
 
 ## How it works
 
-1. **Paste** an image with `Ctrl+V`
-2. Pi saves the clipboard to a temp file and inserts the path into the editor
-3. The extension **detects the image path**, reads the file, and renders a thumbnail above the editor
-4. The raw file path stays in the editor — the label below the thumbnail shows a truncated version
-5. On **submit**, image paths are stripped from the text and the images are attached to your message
+1. **Add an image** — paste with `Ctrl+V`, drag a file onto the terminal, or type/paste a path
+2. For `Ctrl+V`, pi saves the clipboard to a temp file and inserts its path; drag-and-drop and typing insert the path directly
+3. The extension **detects the path** — including backslash-escaped or quoted paths that contain spaces — reads the file, and renders a thumbnail above the editor
+4. The thumbnail is resized and converted to PNG for a compact, reliably-rendered preview; the label below shows the filename
+5. On **submit**, the full-resolution image is attached to your message (the path text stays in the message)
 
 ## Prerequisites
 
@@ -65,7 +66,7 @@ This allows kitty graphics escape sequences to pass through tmux to the terminal
 - GIF (first frame)
 - WebP
 
-Maximum file size: **50 MB** (larger files are silently skipped).
+Non-PNG formats are converted to PNG for display, since the kitty graphics protocol transmits PNG. Maximum file size: **50 MB** (larger files are silently skipped).
 
 ## Limitations
 
