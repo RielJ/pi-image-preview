@@ -24,6 +24,9 @@ export type ExtensionDeps = {
 	loadImageContentFromPath: (
 		filePath: string,
 	) => Promise<ImageContent | null>;
+	/** Downscale the full-size attachment below the provider's per-image byte
+	 * limit before it is submitted. Absent means submit the image unchanged. */
+	resizeForSubmission?: (image: ImageContent) => Promise<ImageContent>;
 };
 
 type PiLike = {
@@ -298,7 +301,10 @@ export function registerImagePreviewExtension(
 
 		for (const [trackedPath, entry] of tracked) {
 			if (fullText.includes(trackedPath)) {
-				usedImages.push(entry.image);
+				const attachment = deps.resizeForSubmission
+					? await deps.resizeForSubmission(entry.image)
+					: entry.image;
+				usedImages.push(attachment);
 			}
 		}
 
