@@ -23,7 +23,7 @@ describe("submission image resizing", () => {
 		const result = await resizeForSubmission(original, { resizeImage });
 
 		expect(result).toBe(original);
-		expect(resizeImage.mock.calls.length === 0).toBe(true);
+		expect(resizeImage).not.toHaveBeenCalled();
 	});
 
 	it("downscales an image whose base64 payload exceeds the cap and preserves its format", async () => {
@@ -46,9 +46,7 @@ describe("submission image resizing", () => {
 		});
 
 		const [bytes, mimeType, options] = resizeImage.mock.calls[0];
-		expect(bytes.length === Buffer.from(original.data, "base64").length).toBe(
-			true,
-		);
+		expect(bytes.length).toBe(Buffer.from(original.data, "base64").length);
 		expect(mimeType).toBe("image/png");
 		expect(options).toEqual({
 			maxWidth: SUBMISSION_MAX_DIMENSION,
@@ -69,7 +67,7 @@ describe("submission image resizing", () => {
 		const result = await resizeForSubmission(original, { resizeImage });
 
 		expect(result).toBe(original);
-		expect(warn.mock.calls.length > 0).toBe(true);
+		expect(warn).toHaveBeenCalled();
 		warn.mockRestore();
 	});
 
@@ -87,7 +85,7 @@ describe("submission image resizing", () => {
 		const result = await resizeForSubmission(original, { resizeImage });
 
 		expect(result).toBe(original);
-		expect(warn.mock.calls.length > 0).toBe(true);
+		expect(warn).toHaveBeenCalled();
 		warn.mockRestore();
 	});
 });
