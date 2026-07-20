@@ -70,6 +70,65 @@ describe("submit attachment resizing", () => {
 		}
 	});
 
+	it("resizes multiple oversized attachments concurrently and preserves order", async () => {
+		const rawA = {
+			type: "image" as const,
+			data: "RAW_A",
+			mimeType: "image/png",
+		};
+		const rawB = {
+			type: "image" as const,
+			data: "RAW_B",
+			mimeType: "image/png",
+		};
+		const byPath: Record<string, any> = {
+			"/tmp/a.png": rawA,
+			"/tmp/b.png": rawB,
+		};
+		const started: string[] = [];
+		let releaseA!: () => void;
+		const aGate = new Promise<void>((resolve) => {
+			releaseA = resolve;
+		});
+		const resizeForSubmission = vi.fn(async (img: any) => {
+			started.push(img.data);
+			if (img.data === "RAW_A") await aGate;
+			return {
+				type: "image" as const,
+				data: `${img.data}_SMALL`,
+				mimeType: img.mimeType,
+			};
+		});
+		const deps = {
+			readImageContentFromPathAsync: vi.fn(
+				async (p: string) => byPath[p] ?? null,
+			),
+			loadImageContentFromPath: vi.fn(async () => null),
+			resizeForSubmission,
+		};
+		const { handlers, ctx } = makeHarness(deps);
+		const text = "see /tmp/a.png and /tmp/b.png";
+		ctx.ui.getEditorText = vi.fn(() => text);
+
+		await handlers.get("session_start")!(undefined, ctx);
+		await new Promise((r) => setTimeout(r, 300));
+
+		const submit = handlers.get("input")!({ text, images: [] }, ctx);
+		await Promise.resolve();
+		await Promise.resolve();
+
+		// Both resizes must start even while the first is still pending.
+		expect(started.length === 2).toBe(true);
+
+		releaseA();
+		const result = await submit;
+		expect(result.action).toBe("transform");
+		expect(result.images).toEqual([
+			{ type: "image", data: "RAW_A_SMALL", mimeType: "image/png" },
+			{ type: "image", data: "RAW_B_SMALL", mimeType: "image/png" },
+		]);
+	});
+
 	it("attaches the original image when no submission resizer is provided", async () => {
 		vi.useFakeTimers();
 		try {

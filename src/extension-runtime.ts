@@ -296,17 +296,18 @@ export function registerImagePreviewExtension(
 			return { action: "continue" };
 		}
 
-		// Collect images for all tracked paths in the submitted text
-		const usedImages: ImageContent[] = [];
-
-		for (const [trackedPath, entry] of tracked) {
-			if (fullText.includes(trackedPath)) {
-				const attachment = deps.resizeForSubmission
-					? await deps.resizeForSubmission(entry.image)
-					: entry.image;
-				usedImages.push(attachment);
-			}
-		}
+		// Collect images for all tracked paths in the submitted text, resizing
+		// them concurrently while preserving their order in the submitted text.
+		const matched = [...tracked.entries()]
+			.filter(([trackedPath]) => fullText.includes(trackedPath))
+			.map(([, entry]) => entry);
+		const usedImages: ImageContent[] = await Promise.all(
+			matched.map((entry) =>
+				deps.resizeForSubmission
+					? deps.resizeForSubmission(entry.image)
+					: Promise.resolve(entry.image),
+			),
+		);
 
 		if (usedImages.length === 0) {
 			return { action: "continue" };
