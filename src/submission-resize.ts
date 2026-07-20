@@ -1,8 +1,9 @@
 import type { ImageContent } from "./content.ts";
 
-/** Providers reject images larger than ~5 MB per image, so cap the full-size
- * attachment (distinct from the tiny gallery thumbnail) before submission. */
-export const SUBMISSION_MAX_BYTES = 5 * 1024 * 1024;
+/** Providers reject images larger than ~5 MB per image, measured on the base64
+ * payload sent over the wire. Cap the full-size attachment (distinct from the
+ * tiny gallery thumbnail) a little below that hard wall for headroom. */
+export const SUBMISSION_MAX_BYTES = 4.5 * 1024 * 1024;
 /** Keep the attachment high-resolution — only bound it below the API pixel
  * limit so quality is preserved while the byte cap does the real shrinking. */
 export const SUBMISSION_MAX_DIMENSION = 8000;
@@ -28,8 +29,10 @@ export async function resizeForSubmission(
 	deps: SubmissionResizeDeps,
 ): Promise<ImageContent> {
 	try {
+		// Gate on the encoded payload — the axis the provider's limit applies to.
+		// base64 is ASCII, so the string length equals its byte size.
+		if (image.data.length <= SUBMISSION_MAX_BYTES) return image;
 		const bytes = Buffer.from(image.data, "base64");
-		if (bytes.length <= SUBMISSION_MAX_BYTES) return image;
 		const resized = await deps.resizeImage(bytes, image.mimeType, {
 			maxWidth: SUBMISSION_MAX_DIMENSION,
 			maxHeight: SUBMISSION_MAX_DIMENSION,
