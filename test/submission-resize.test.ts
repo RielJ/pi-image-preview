@@ -57,7 +57,8 @@ describe("submission image resizing", () => {
 		});
 	});
 
-	it("keeps the original when the resizer cannot shrink it", async () => {
+	it("warns and keeps the original when the resizer cannot shrink it", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		const resizeImage = vi.fn(async () => null);
 		const original = {
 			type: "image" as const,
@@ -68,9 +69,12 @@ describe("submission image resizing", () => {
 		const result = await resizeForSubmission(original, { resizeImage });
 
 		expect(result).toBe(original);
+		expect(warn.mock.calls.length > 0).toBe(true);
+		warn.mockRestore();
 	});
 
-	it("keeps the original when the resizer throws", async () => {
+	it("warns and keeps the original when the resizer throws", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		const resizeImage = vi.fn(async () => {
 			throw new Error("resize unavailable");
 		});
@@ -83,5 +87,7 @@ describe("submission image resizing", () => {
 		const result = await resizeForSubmission(original, { resizeImage });
 
 		expect(result).toBe(original);
+		expect(warn.mock.calls.length > 0).toBe(true);
+		warn.mockRestore();
 	});
 });

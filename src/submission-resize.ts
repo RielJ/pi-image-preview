@@ -38,9 +38,18 @@ export async function resizeForSubmission(
 			maxHeight: SUBMISSION_MAX_DIMENSION,
 			maxBytes: SUBMISSION_MAX_BYTES,
 		});
-		if (!resized) return image;
+		if (!resized) {
+			console.warn(
+				`[image-preview] could not downscale a ${(image.data.length / 1024 / 1024).toFixed(1)}MB attachment below the ${(SUBMISSION_MAX_BYTES / 1024 / 1024).toFixed(1)}MB limit; submitting it unchanged`,
+			);
+			return image;
+		}
 		return { type: "image", data: resized.data, mimeType: resized.mimeType };
-	} catch {
+	} catch (err) {
+		console.warn(
+			"[image-preview] failed to downscale an oversized attachment; submitting it unchanged",
+			err,
+		);
 		return image;
 	}
 }
