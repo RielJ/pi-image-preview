@@ -68,6 +68,8 @@ This allows kitty graphics escape sequences to pass through tmux to the terminal
 
 Non-PNG formats are converted to PNG for display, since the kitty graphics protocol transmits PNG. Maximum file size: **50 MB** (larger files are silently skipped).
 
+Images larger than **~5 MB** are automatically downscaled to fit the provider's per-image API limit before the message is submitted (the inline preview thumbnail is a separate, smaller image). The original file on disk is never modified.
+
 ## Limitations
 
 - **Kitty terminal only** — other terminals get text-only labels (no image rendering)
