@@ -31,17 +31,16 @@ const CLIENT_FORMAT =
 /**
  * Parses the output of one probe: the first line is this pane's session and
  * whether its window is active, the rest are every client on the server.
- * Keeps the clients viewing this pane's session.
+ * Keeps the clients viewing this pane's session. A header without the window
+ * field counts as visible.
  */
 export function parseClients(output: string): {
 	signature: string;
 	clients: TmuxClient[];
+	windowActive: boolean;
 } {
 	const [header = "", ...rest] = output.split("\n").map((line) => line.trim());
-	// The header also carries whether the pane's window is the visible one:
-	// tmux forwards image data only to clients that can see the pane, so a
-	// window becoming visible must count as a change too.
-	const [session = "", windowActive = ""] = header.split("\t");
+	const [session = "", windowActive = "1"] = header.split("\t");
 	const rows = rest
 		.filter((row) => row && row.split("\t")[0] === session)
 		.sort();
@@ -49,7 +48,7 @@ export function parseClients(output: string): {
 		const [, , termType = "", termName = ""] = row.split("\t");
 		return { termType, termName };
 	});
-	return { signature: [windowActive, ...rows].join("\n"), clients };
+	return { signature: rows.join("\n"), clients, windowActive: windowActive !== "0" };
 }
 
 /**
@@ -64,23 +63,13 @@ export function decide(
 	return clients.every(clientSupportsKitty);
 }
 
-function envSuggestsKitty(): boolean {
-	const termProgram = process.env.TERM_PROGRAM?.toLowerCase() || "";
-	return Boolean(
-		process.env.KITTY_WINDOW_ID ||
-			termProgram === "kitty" ||
-			termProgram === "ghostty" ||
-			process.env.GHOSTTY_RESOURCES_DIR ||
-			termProgram === "wezterm" ||
-			process.env.WEZTERM_PANE,
-	);
-}
-
+/**
+ * True only when this process runs in a tmux pane. TERM=tmux-* without $TMUX
+ * means pi runs downstream of someone else's tmux (ssh out of a pane): that
+ * tmux cannot be asked who is watching, and passthrough would not reach it.
+ */
 export function isInTmuxSession(): boolean {
-	return (
-		Boolean(process.env.TMUX) ||
-		(process.env.TERM?.toLowerCase() || "").startsWith("tmux")
-	);
+	return Boolean(process.env.TMUX);
 }
 
 function probeArgs(): string[] {
@@ -104,22 +93,54 @@ function probeArgs(): string[] {
 
 let kitty: boolean | undefined;
 let signature = "";
+let windowActive: boolean | undefined;
 let epoch = 0;
+/** When a probe last saw this pane's window visible, and when we last sent image data. */
+let lastSeenVisibleAt = 0;
+let lastTransmitAt = -1;
 const listeners = new Set<() => void>();
 
-/** Records the output of one tmux probe (see probeArgs). Exported for tests. */
-export function recordTmuxClients(output: string): void {
-	const parsed = parseClients(output);
-	const next = decide(parsed.clients, kitty ?? envSuggestsKitty());
-	if (parsed.signature === signature && next === kitty) return;
-	const firstProbe = kitty === undefined;
-	signature = parsed.signature;
-	kitty = next;
-	// tmux forwards kitty image data only to clients viewing the pane at that
-	// moment, so a client that arrives later never received it. A new epoch
-	// tells renderers to send their images again.
+function changed(firstProbe: boolean): void {
+	// A new epoch tells renderers to send their images again.
 	epoch++;
 	if (!firstProbe) for (const listener of listeners) listener();
+}
+
+/** Records the output of one tmux probe (see probeArgs). Exported for tests. */
+export function recordTmuxClients(output: string, now = Date.now()): void {
+	const parsed = parseClients(output);
+	const firstProbe = kitty === undefined;
+	const next = decide(parsed.clients, kitty ?? false);
+	const clientsChanged = parsed.signature !== signature || next !== kitty;
+	// tmux forwards image data only to clients that can see the pane. If data
+	// went out after the last probe that saw the window visible, it may have
+	// been dropped while the window was hidden, so send it again on return.
+	const missedWhileHidden =
+		parsed.windowActive &&
+		windowActive === false &&
+		lastTransmitAt >= lastSeenVisibleAt;
+	signature = parsed.signature;
+	kitty = next;
+	windowActive = parsed.windowActive;
+	if (parsed.windowActive) lastSeenVisibleAt = now;
+	if (firstProbe || clientsChanged || missedWhileHidden) changed(firstProbe);
+}
+
+/**
+ * Without an answer from tmux nobody is confirmed to speak kitty, so images
+ * stay off until a probe succeeds. Exported for tests.
+ */
+export function recordProbeFailure(): void {
+	const firstProbe = kitty === undefined;
+	signature = "";
+	if (kitty === false) return;
+	kitty = false;
+	changed(firstProbe);
+}
+
+/** Called whenever kitty image data is written to the terminal. */
+export function noteImageTransmitted(now = Date.now()): void {
+	lastTransmitAt = now;
 }
 
 function probeSync(): void {
@@ -132,7 +153,7 @@ function probeSync(): void {
 			}),
 		);
 	} catch {
-		kitty ??= envSuggestsKitty();
+		recordProbeFailure();
 	}
 }
 
@@ -155,7 +176,8 @@ export function watchTmuxClients(onChange: () => void): () => void {
 				{ encoding: "utf8", timeout: 1000 },
 				(error, stdout) => {
 					probing = false;
-					if (!error) recordTmuxClients(stdout);
+					if (error) recordProbeFailure();
+					else recordTmuxClients(stdout);
 				},
 			);
 		}, 1000);

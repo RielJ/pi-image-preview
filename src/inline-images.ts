@@ -108,11 +108,42 @@ function renderInline(
 	// No size means pi-tui fell back to text (for example, no PNG converter).
 	if (!size || !data) return direct;
 
-	const imageId = previous?.imageId ?? allocateImageId();
-	transmitImageWithPlaceholder(data, imageId, size.columns, size.rows);
+	const imageId = sendOnce(data, size.columns, size.rows, previous?.imageId);
 	const lines = placeholderLines(imageId, size.columns, size.rows);
 	states.set(this, { key, lines, imageId });
 	return lines;
+}
+
+type Sent = { imageId: number; epoch: number; columns: number; rows: number };
+
+/**
+ * Image data already in kitty, by base64 payload. pi rebuilds its Image
+ * components on every invalidate, so without this each redraw would send
+ * every transcript image again under a new ID and leave the old ones behind.
+ */
+const sent = new Map<string, Sent>();
+
+function sendOnce(
+	data: string,
+	columns: number,
+	rows: number,
+	fallbackId: number | undefined,
+): number {
+	const epoch = imageEpoch();
+	const known = sent.get(data);
+	if (
+		known &&
+		known.epoch === epoch &&
+		known.columns === columns &&
+		known.rows === rows
+	) {
+		return known.imageId;
+	}
+	// Re-sending under the same ID replaces the image in kitty.
+	const imageId = known?.imageId ?? fallbackId ?? allocateImageId();
+	transmitImageWithPlaceholder(data, imageId, columns, rows);
+	sent.set(data, { imageId, epoch, columns, rows });
+	return imageId;
 }
 
 // ── Redraw on client change ────────────────────────────────
@@ -216,6 +247,7 @@ export function installInlineImages(): () => void {
 		saved = undefined;
 		proto.render = original;
 		delete proto[PATCHED];
+		sent.clear();
 		redraw();
 	};
 }

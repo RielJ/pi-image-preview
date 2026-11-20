@@ -4,6 +4,8 @@
  * tmux stores as ordinary text, so they stay with their pane.
  */
 
+import { isInTmuxSession, noteImageTransmitted } from "./image-protocol.ts";
+
 // Counter for kitty image IDs over the full 24-bit range (1–16,777,215) that
 // kitty's true-color encoding supports. Counting avoids collisions inside one
 // process; the random start keeps several pi processes sharing one kitty from
@@ -59,15 +61,11 @@ function diacriticFor(n: number): string {
 	return String.fromCodePoint(ROW_COL_DIACRITICS[0]);
 }
 
-export function isInTmux(): boolean {
-	return Boolean(process.env.TMUX);
-}
-
 /**
  * Wrap kitty APC sequences in DCS passthrough for tmux.
  */
 function wrapForTmux(sequence: string): string {
-	if (!isInTmux()) return sequence;
+	if (!isInTmuxSession()) return sequence;
 	return sequence.replace(
 		/\x1b_G([^\x1b]*)\x1b\\/g,
 		(_match, content) =>
@@ -90,6 +88,7 @@ export function transmitImageWithPlaceholder(
 	// a=T: transmit and display, U=1: use unicode placeholders
 	// q=2: suppress all responses (important in tmux)
 	const CHUNK_SIZE = 4096;
+	noteImageTransmitted();
 
 	if (base64Data.length <= CHUNK_SIZE) {
 		const seq = `\x1b_Ga=T,U=1,f=100,i=${imageId},c=${columns},r=${rows},q=2;${base64Data}\x1b\\`;

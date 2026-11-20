@@ -5,7 +5,9 @@ import {
 	decide,
 	detectImageProtocol,
 	imageEpoch,
+	isInTmuxSession,
 	parseClients,
+	recordProbeFailure,
 	recordTmuxClients,
 } from "../src/image-protocol.ts";
 import { installInlineImages, parsePlacementSize } from "../src/inline-images.ts";
@@ -13,6 +15,8 @@ import { installInlineImages, parsePlacementSize } from "../src/inline-images.ts
 // 1×1 transparent PNG.
 const PNG =
 	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+/** A distinct but still valid PNG payload (one IDAT byte changed). */
+const pngVariant = (n: number) => PNG.replace("A60e6kg", `A60e6k${"BCDEFGH"[n]}`);
 const theme = { fallbackColor: (s: string) => s };
 const PLACEHOLDER = String.fromCodePoint(0x10eeee);
 
@@ -34,10 +38,22 @@ describe("tmux client detection", () => {
 		expect(clients).toEqual([{ termType: "kitty(0.49.2)", termName: "xterm-kitty" }]);
 	});
 
-	it("counts the pane's window becoming visible as a change", () => {
-		const hidden = parseClients(`$4\t0\n${kittyLaptop}`).signature;
-		const visible = parseClients(`$4\t1\n${kittyLaptop}`).signature;
-		expect(hidden).not.toBe(visible);
+	it("reads whether the pane's window is visible, defaulting to visible", () => {
+		expect(parseClients(`$4\t0\n${kittyLaptop}`).windowActive).toBe(false);
+		expect(parseClients(`$4\t1\n${kittyLaptop}`).windowActive).toBe(true);
+		expect(parseClients(probe(kittyLaptop)).windowActive).toBe(true);
+	});
+
+	it("treats only $TMUX as being inside tmux, not TERM=tmux-* from an ssh hop", () => {
+		const env = { TMUX: process.env.TMUX, TERM: process.env.TERM };
+		delete process.env.TMUX;
+		process.env.TERM = "tmux-256color";
+		expect(isInTmuxSession()).toBe(false);
+		process.env.TMUX = "/tmp/tmux-test,1,0";
+		expect(isInTmuxSession()).toBe(true);
+		if (env.TMUX === undefined) delete process.env.TMUX;
+		else process.env.TMUX = env.TMUX;
+		process.env.TERM = env.TERM;
 	});
 
 	it("needs every viewer to speak kitty, and keeps the last answer when nobody is attached", () => {
@@ -130,6 +146,55 @@ describe("inline images in tmux", () => {
 
 		image.render(80);
 		expect(writes.length).toBe(2);
+	});
+
+	it("does not re-send an image pi rebuilt with the same data", () => {
+		recordTmuxClients(probe(kittyLaptop));
+		const first = new Image(pngVariant(0), "image/png", theme).render(80);
+		const rebuilt = new Image(pngVariant(0), "image/png", theme).render(80);
+		expect(writes.length).toBe(1);
+		expect(rebuilt).toEqual(first);
+	});
+
+	it("re-sends after the window returns only if data went out while it was hidden", () => {
+		const visible = `$4\t1\n${kittyLaptop}`;
+		const hidden = `$4\t0\n${kittyLaptop}`;
+		// Start after every real transmission made by earlier tests.
+		const base = Date.now() + 60_000;
+		vi.useFakeTimers({ toFake: ["Date"] });
+		try {
+			const at = (ms: number) => {
+				vi.setSystemTime(base + ms);
+				return Date.now();
+			};
+			recordTmuxClients(visible, at(1000));
+
+			const quiet = imageEpoch();
+			recordTmuxClients(hidden, at(2000));
+			recordTmuxClients(visible, at(3000));
+			expect(imageEpoch()).toBe(quiet);
+
+			recordTmuxClients(hidden, at(4000));
+			at(4500);
+			new Image(pngVariant(1), "image/png", theme).render(80);
+			expect(writes.length).toBe(1);
+			recordTmuxClients(visible, at(5000));
+			expect(imageEpoch()).toBe(quiet + 1);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
+	it("turns images off when tmux cannot be asked, until a probe succeeds", () => {
+		recordTmuxClients(probe(kittyLaptop));
+		expect(getCapabilities().images).toBe("kitty");
+
+		recordProbeFailure();
+		expect(detectImageProtocol()).toBeNull();
+		expect(getCapabilities().images).toBeNull();
+
+		recordTmuxClients(probe(kittyLaptop));
+		expect(getCapabilities().images).toBe("kitty");
 	});
 
 	it("reads the cell size pi-tui chose from its kitty sequence", () => {
