@@ -5,6 +5,7 @@ import {
 	type ImageResizer,
 } from "./src/image-content.ts";
 import { registerImagePreviewExtension } from "./src/extension-runtime.ts";
+import { installInlineImages } from "./src/inline-images.ts";
 import { resizeForPreview } from "./src/preview-resize.ts";
 import { resizeForSubmission } from "./src/submission-resize.ts";
 
@@ -26,5 +27,16 @@ export default function (pi: any): void {
 		maybeResizeImage: buildPreviewThumbnail,
 		resizeForSubmission: shrinkAttachmentForSubmission,
 		loadImageContentFromPath: (filePath) => loadImageContentFromPath(filePath),
+	});
+
+	// Chat images inline inside tmux, matching what pi draws in kitty or Rex.
+	let uninstall: (() => void) | undefined;
+	pi.on("session_start", (_event: unknown, ctx: { hasUI?: boolean }) => {
+		if (ctx.hasUI === false || uninstall) return;
+		uninstall = installInlineImages();
+	});
+	pi.on("session_shutdown", () => {
+		uninstall?.();
+		uninstall = undefined;
 	});
 }
