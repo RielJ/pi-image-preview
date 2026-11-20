@@ -34,9 +34,11 @@
     "url": "git+https://github.com/rielj/pi-image-preview.git"
   },
   "peerDependencies": {
-    "@mariozechner/pi-coding-agent": "*"
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
   },
   "devDependencies": {
+    "@types/node": "^22.10.0",
     "vitest": "^4.1.9"
   }
 }
